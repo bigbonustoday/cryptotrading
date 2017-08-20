@@ -10,8 +10,8 @@ POLO_SECRET = 'bf58a91a5c669dc014c3320a10fc32349cf4501aa605aafb99f45efd7f52cab8d
 polo = polo_api.poloniex(APIKey=POLO_KEY, Secret=POLO_SECRET)
 
 # home currency and hub currencies
-HOME = 'BTC'
-HUBS = ['BTC', 'ETH']
+HOME = 'USDT'
+HUBS = ['BTC', 'ETH', 'XMR']
 
 # all traded pairs
 ALL_PAIRS = list(polo.returnTicker().keys())
@@ -21,9 +21,20 @@ ALL_CURRENCIES = list({x.split('_')[0] for x in ALL_PAIRS} | \
 # default start, end dates in UNIX time, default sampling frequency
 START = 0
 END = 9999999999
-PERIOD = 86400
+PERIOD = 7200
 
-def get_bars(currency, home=HOME, period=PERIOD, start=START, end=END):
+
+def get_intraday_data(region=ALL_PAIRS, period=PERIOD):
+    print('Loading OHLC, volume data for')
+    data_panel = {}
+    for currency in [x for x in region if x!= HOME]:
+        print('...', currency)
+        data_panel[currency] = _get_bars(currency, period=period)
+    data_panel = pd.Panel(data_panel)
+    return data_panel
+
+
+def _get_bars(currency, home=HOME, period=PERIOD, start=START, end=END):
     bars = None
     currencyPair = home + '_' + currency
     if currencyPair in ALL_PAIRS:
