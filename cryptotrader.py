@@ -4,12 +4,16 @@ import datetime
 import numpy as np
 from pandas.tseries.offsets import BDay
 
+# global backtest start date
 GLOBAL_START_DATE = '2015-9-1'
 
+# global daily price snap time
 GLOBAL_SNAP_TIME = datetime.time(17, 0)
 
+# trading cross section
 liquid_region = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB', 'USDT']
 
+# default home currency=USDT
 HOME = data.HOME
 
 
@@ -19,9 +23,11 @@ def _print_date_every_year(date):
     return
 
 
+# main tradebot class
 class CryptoTrader():
-    def __init__(self, region, data_frequency_in_seconds=7200, cov_window_in_days=120,
+    def __init__(self, region=liquid_region, data_frequency_in_seconds=7200, cov_window_in_days=120,
                  trading_lag=1, no_naked_short=True):
+
         # initialize settings
         self.region = region
         self.period = data_frequency_in_seconds
@@ -53,25 +59,30 @@ class CryptoTrader():
         self.asset_returns = self.compute_daily_asset_returns()
         return
 
+    # daily asset returns series for backtest
     def compute_daily_asset_returns(self):
         intraday_ti = self.get_intraday_ti()
         daily_ti = intraday_ti[intraday_ti.index.time <= GLOBAL_SNAP_TIME].resample('B').last()
         daily_returns = daily_ti.fillna(method='pad', limit=5).pct_change()
         return daily_returns
 
+    # public method to get raw intraday total return index
     def get_intraday_ti(self):
         ti = self.data.loc[:, :, 'close'].copy(deep=True)
         ti[HOME] = 1
         return ti
 
+    # compute variance covariance matrix for one date
     def get_risk_model_one_date(self, date, window=None):
         window = window or self.cov_window
         start_date = pd.Timestamp(date) - BDay(window)
+        # TODO: robust treatment for small number of returns
         sliced_ti = self.get_intraday_ti().ix[start_date: date]
         annualizer = 260.0 / (float(window) / len(sliced_ti))
         cov_matrix = sliced_ti.pct_change().cov() * annualizer
         return cov_matrix
 
+    # load factor values
     def load_factors(self):
         # mom 1m
         self.factors['mom 1m'] = self.compute_mom_factor(window=20)
@@ -80,6 +91,7 @@ class CryptoTrader():
             raise ValueError('Factor list mismatch!')
         return
 
+    # price mom
     def compute_mom_factor(self, window):
         return self.asset_returns.rolling(window=window, min_periods=window - 5, center=False).mean()
 
@@ -114,6 +126,7 @@ class CryptoTrader():
         self.views = pd.Panel(view_panel)
         return
 
+    # compute ex ante portfolio vol using covs
     def compute_portfolio_vol(self, views):
         vols = pd.Series()
         for date in self.dates:
@@ -121,6 +134,7 @@ class CryptoTrader():
         vols = vols ** 0.5
         return vols
 
+    # compute gross/net portfolio returns, assuming 0.3% tcost
     def compute_portfolio_returns(self, port='PORT', rebal_rule='W'):
         views = self.views[port].resample(rebal_rule).last()
         intraday_ti = self.get_intraday_ti()
