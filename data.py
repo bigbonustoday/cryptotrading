@@ -65,6 +65,7 @@ def _get_bars(currency, home=HOME, period=PERIOD, start=START, end=END):
 def get_pair_bars(currencyPair, period=PERIOD, start=START, end=END):
     bars = convert_to_df(polo.returnChartData(currencyPair, start, end ,period),
                          time_key='date')
+
     return bars
 
 

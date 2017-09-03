@@ -25,7 +25,7 @@ def _print_date_every_year(date):
 
 # main tradebot class
 class CryptoTrader():
-    def __init__(self, region=liquid_region, data_frequency_in_seconds=7200, cov_window_in_days=120,
+    def __init__(self, region=liquid_region, risk_target=0.3, data_frequency_in_seconds=7200, cov_window_in_days=120,
                  trading_lag=1, no_naked_short=True):
 
         # initialize settings
@@ -34,6 +34,7 @@ class CryptoTrader():
         self.cov_window = cov_window_in_days
         self.lag = trading_lag
         self.no_naked_short = no_naked_short
+        self.risk_target = risk_target
 
         # initialize data members
         self.data = None
@@ -112,7 +113,7 @@ class CryptoTrader():
             factor_values = self.factors[factor_name]
             views = factor_values
             vols = self.compute_portfolio_vol(views)
-            views = views.divide(vols, axis=0).fillna(0) * 0.1
+            views = views.divide(vols, axis=0).fillna(0) * self.risk_target
             view_panel[factor_name] = views.reindex(self.dates)
 
         print ('Running portfolio viewgen')
@@ -121,7 +122,7 @@ class CryptoTrader():
             view += view_panel[factor_name] * self.factor_weights[factor_name]
         if self.no_naked_short:
             view[view < 0] = 0
-        view = view.divide(self.compute_portfolio_vol(view), axis=0) * 0.1
+        view = view.divide(self.compute_portfolio_vol(view), axis=0) * self.risk_target
         view_panel['PORT'] = view.reindex(self.dates)
         self.views = pd.Panel(view_panel)
         return
@@ -144,5 +145,9 @@ class CryptoTrader():
         tcost = views.diff().abs().sum(1)/2 * 0.003
         net_returns = gross_returns - tcost
         return net_returns
+
+    # generate portfolio trades from current holdings
+    def tradegen(self):
+        pass
 
 
