@@ -5,17 +5,18 @@ import numpy as np
 from pandas.tseries.offsets import BDay
 
 # global backtest start date
-GLOBAL_START_DATE = '2015-9-1'
+GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 
 # global daily price snap time
 GLOBAL_SNAP_TIME = datetime.time(17, 0)
 
 # trading cross section
-liquid_region = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB', 'USDT']
+liquid_region = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB']
 
 # default home currency=USDT
 HOME = data.HOME
 
+EPSILON = 10 ** -6
 
 def _print_date_every_year(date):
     if date.month == 12 and date.day in [30, 31]:
@@ -25,8 +26,8 @@ def _print_date_every_year(date):
 
 # main tradebot class
 class CryptoTrader():
-    def __init__(self, region=liquid_region, risk_target=0.3, data_frequency_in_seconds=7200, cov_window_in_days=120,
-                 trading_lag=1, no_naked_short=True):
+    def __init__(self, region=liquid_region, risk_target=0.1, data_frequency_in_seconds=7200, cov_window_in_days=120,
+                 trading_lag=1, no_naked_short=True, max_out_cash=True):
 
         # initialize settings
         self.region = region
@@ -35,16 +36,21 @@ class CryptoTrader():
         self.lag = trading_lag
         self.no_naked_short = no_naked_short
         self.risk_target = risk_target
+        self.max_out_cash = max_out_cash # override risk target; always max out cash usage
 
         # initialize data members
         self.data = None
         self.asset_returns = None
-        self.start_date = datetime.date(2015, 9, 1)
+        self.start_date = GLOBAL_START_DATE
         self.end_date = datetime.date.today()
         self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq='B')
-        self.factor_weights = {
-            'mom 1m': 1
-        }
+        self.factor_weights = pd.Series({
+            'mom 1w': 1,
+            'mom 2w': 1,
+            'mom 1m': 1,
+            'mom 3m': 1,
+            'mom 6m': 1
+        })
         self.factors = {}
         self.cov = None
 
@@ -70,7 +76,6 @@ class CryptoTrader():
     # public method to get raw intraday total return index
     def get_intraday_ti(self):
         ti = self.data.loc[:, :, 'close'].copy(deep=True)
-        ti[HOME] = 1
         return ti
 
     # compute variance covariance matrix for one date
@@ -85,16 +90,36 @@ class CryptoTrader():
 
     # load factor values
     def load_factors(self):
-        # mom 1m
+        # mom 1/2/3/6 m
+        self.factors['mom 1w'] = self.compute_mom_factor(window=5)
+        self.factors['mom 2w'] = self.compute_mom_factor(window=10)
         self.factors['mom 1m'] = self.compute_mom_factor(window=20)
+        self.factors['mom 3m'] = self.compute_mom_factor(window=60)
+        self.factors['mom 6m'] = self.compute_mom_factor(window=120)
 
-        if set(self.factors.keys()) != set(self.factor_weights.keys()):
-            raise ValueError('Factor list mismatch!')
+        # inv vol
+        self.factors['invvol 1m'] = self.compute_inv_vol_factor(window=20)
+        self.factors['invvol 6m'] = self.compute_inv_vol_factor(window=120)
+
+        # skew
+        self.factors['skew 1m'] = self.compute_skew_factor(window=20)
+        self.factors['skew 6m'] = self.compute_skew_factor(window=120)
+
+        if not set(self.factor_weights.keys()).issubset(set(self.factors.keys())):
+            raise ValueError('Undefined factor(s) found!')
         return
 
     # price mom
     def compute_mom_factor(self, window):
         return self.asset_returns.rolling(window=window, min_periods=window - 5, center=False).mean()
+
+    # inverse vol
+    def compute_inv_vol_factor(self, window):
+        return -self.asset_returns.rolling(window=window, min_periods=window - 5, center=False).std()
+
+    # skew
+    def compute_skew_factor(self, window):
+        return -self.asset_returns.rolling(window=window, min_periods=window - 5).skew()
 
     def covgen(self):
         print('Running covgen')
@@ -118,11 +143,25 @@ class CryptoTrader():
 
         print ('Running portfolio viewgen')
         view = 0
-        for factor_name in view_panel.keys():
+        for factor_name in self.factor_weights.keys():
             view += view_panel[factor_name] * self.factor_weights[factor_name]
+        view = view.divide(self.factor_weights.sum())
         if self.no_naked_short:
             view[view < 0] = 0
-        view = view.divide(self.compute_portfolio_vol(view), axis=0) * self.risk_target
+        vols = self.compute_portfolio_vol(view)
+        view = view.divide(vols, axis=0).multiply(self.risk_target)
+        view = view.fillna(0)
+
+        # cap leverage at 1.00
+        leverage = view.sum(1)
+        leverage[leverage < 1.00] = 1.00
+        view = view.divide(leverage, axis=0).multiply(1.00).fillna(0)
+
+        # home currency view
+        if self.max_out_cash:
+            view = view.divide(view.sum(1), axis=0).multiply(1.00).fillna(0)
+        view[HOME] = 1 - view.sum(1)
+
         view_panel['PORT'] = view.reindex(self.dates)
         self.views = pd.Panel(view_panel)
         return
@@ -136,18 +175,27 @@ class CryptoTrader():
         return vols
 
     # compute gross/net portfolio returns, assuming 0.3% tcost
-    def compute_portfolio_returns(self, port='PORT', rebal_rule='W'):
-        views = self.views[port].resample(rebal_rule).last()
-        intraday_ti = self.get_intraday_ti()
-        ti = intraday_ti.resample(rebal_rule).last()
-        asset_returns = ti.pct_change()
-        gross_returns = asset_returns.multiply(views.shift(self.lag)).sum(1)
-        tcost = views.diff().abs().sum(1)/2 * 0.003
-        net_returns = gross_returns - tcost
+    def compute_portfolio_returns(self, rebal_rule='W'):
+        net_returns = pd.DataFrame()
+        for port in self.views.keys():
+            views = self.views[port].resample(rebal_rule).last()
+            intraday_ti = self.get_intraday_ti()
+            ti = intraday_ti.resample(rebal_rule).last()
+            asset_returns = ti.pct_change()
+            gross_returns = asset_returns.multiply(views.shift(self.lag)).sum(1)
+            tcost = views.diff().abs().sum(1)/2 * 0.003
+            net_returns[port] = gross_returns - tcost
         return net_returns
 
     # generate portfolio trades from current holdings
     def tradegen(self):
-        pass
+        current_view = self.views['PORT'].ix[-1]
+        position_dict = data.get_current_positions()
+        current_positions = pd.Series(
+            {label: float(position_dict[label])
+             for label in position_dict.keys()
+             })
+        trade = (current_view - current_positions).dropna()
+        return trade
 
 

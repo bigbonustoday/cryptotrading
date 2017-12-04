@@ -69,6 +69,9 @@ def get_pair_bars(currencyPair, period=PERIOD, start=START, end=END):
     return bars
 
 
+def get_current_positions():
+    return polo.returnBalances()
+
 def convert_to_df(input, time_key='date'):
     df = pd.DataFrame(input)
 
