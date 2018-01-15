@@ -29,7 +29,6 @@ class executionBot():
                 assert order[2] > 0
             if order[3] is not None:
                 assert order[3] > 0
-        print('All order entries are confirmed valid!')
 
     def execute_all_orders_on_polo(self):
         print(str(len(self.orders)) + ' orders received!')
