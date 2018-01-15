@@ -9,13 +9,12 @@ from polo_account_info import POLO_KEY, POLO_SECRET
 polo = polo_api.poloniex(APIKey=POLO_KEY, Secret=POLO_SECRET)
 
 # home currency and hub currencies
-HOME = 'USDT'
 HUBS = ['BTC', 'ETH', 'XMR']
 
 # all traded pairs
 ALL_PAIRS = list(polo.returnTicker().keys())
 ALL_CURRENCIES = list({x.split('_')[0] for x in ALL_PAIRS} | \
-                      {x.split('_')[1] for x in ALL_PAIRS} - {HOME})
+                      {x.split('_')[1] for x in ALL_PAIRS})
 
 # default start, end dates in UNIX time, default sampling frequency
 START = 0
