@@ -207,8 +207,8 @@ class traderBot():
         vols = vols ** 0.5
         return vols
 
-    # compute gross/net portfolio returns, assuming 0.3% tcost
-    def compute_portfolio_returns(self, rebal_rule='W'):
+    # compute gross/net portfolio returns, assuming 1% tcost
+    def compute_portfolio_returns(self, rebal_rule='W', unit_tcost=0.01):
         net_returns = pd.DataFrame()
         for port in self.views.keys():
             views = self.views[port].resample(rebal_rule).last()
@@ -216,7 +216,7 @@ class traderBot():
             ti = intraday_ti.resample(rebal_rule).last()
             asset_returns = ti.pct_change()
             gross_returns = asset_returns.multiply(views.shift(self.lag)).sum(1)
-            tcost = views.diff().abs().sum(1) / 2 * 0.003
+            tcost = views.diff().abs().sum(1) / 2 * unit_tcost
             net_returns[port] = gross_returns - tcost
         return net_returns
 

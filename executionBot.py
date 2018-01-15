@@ -32,15 +32,17 @@ class executionBot():
         print('All order entries are confirmed valid!')
 
     def execute_all_orders_on_polo(self):
+        print(str(len(self.orders)) + ' orders received!')
+
         order_numbers = []
         for order in self.orders:
             order_number = self.send_single_order_on_polo(order=order)
             if order_number is not None:
                 order_numbers.append(order_number)
 
-        print('All orders are placed!')
+        print (str(len(order_numbers)) + ' order(s) placed!')
 
-        all_orders_filled = False
+        filled_orders_count = 0
         for attempt in range(1, 60):
             if len(order_numbers) > 0:
                 print('Attempt #' + str(attempt) + 'Sleep for 60s for order execution...')
@@ -50,15 +52,13 @@ class executionBot():
                     # TODO: is order filled?
                     if order_is_filled:
                         order_numbers.remove(order_number)
+                        filled_orders_count += 1
             else:
-                all_orders_filled = True
-                print ('All orders are filled!')
                 break
 
-        if not all_orders_filled:
-            print('Some orders remain unfilled. Timeout after 60 attempts.')
+        print(str(filled_orders_count) + ' order(s) filled!')
 
-        return all_orders_filled
+        return
 
 
 
@@ -95,8 +95,8 @@ class executionBot():
 
         # refresh quotes
         ticker_info = polo.returnTicker()
-        bid = ticker_info[ticker]['highestBid']
-        ask = ticker_info[ticker]['lowestAsk']
+        bid = float(ticker_info[ticker]['highestBid'])
+        ask = float(ticker_info[ticker]['lowestAsk'])
         if order_type == 'BUY':
             limit = bid - (ask - bid) * limit_x_spread
         else:
@@ -109,11 +109,14 @@ class executionBot():
         else:
             output = polo.sell(currencyPair=ticker, rate=limit, amount=amount)
 
+        order_description = order_type + ' ' + ticker + ' at ' + str(limit) + ', amount = ' + str(amount)
+
         if 'error' in output.keys():
             print ('Order error: ' + output['error'])
+            print ('...failed to place order: ' + order_description)
             return None
 
-        print('...order #' + str(output['orderNumber']))
+        print('Order placed #' + str(output['orderNumber']) + ': ' + order_description)
 
 
         return output['orderNumber']
