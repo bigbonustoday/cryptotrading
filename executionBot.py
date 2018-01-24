@@ -42,7 +42,7 @@ class executionBot():
 
         assert len(self.buy_orders) + len(self.sell_orders) == len(self.orders)
 
-    def execute_orders_on_polo(self, order_list, max_wait_time_in_minutes=60):
+    def execute_orders_on_polo(self, order_list, max_wait_time_in_minutes=180):
         self.logger.info(str(len(order_list)) + ' orders received!')
 
         order_numbers = []
