@@ -3,13 +3,14 @@ from cryptotrading.executionBot import executionBot
 import pandas as pd
 import datetime
 import numpy as np
+import logging
 from pandas.tseries.offsets import BDay
 
 # global backtest start date
 GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 
 # global daily price snap time
-GLOBAL_SNAP_TIME = datetime.time(17, 0)
+GLOBAL_SNAP_TIME = datetime.time(10, 0)
 
 # trading cross section
 POLO_CROSS_SECTION = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB']
@@ -23,17 +24,11 @@ EPSILON = 10 ** -6
 MIN_NUM_OF_RETURNS_FOR_COV = 500.0
 
 
-def _print_date_every_year(date):
-    if date.month == 12 and date.day in [30, 31]:
-        print('...', date)
-    return
-
-
 # main tradebot class
 class traderBot():
     def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00, data_frequency_in_seconds=7200.0,
                  cov_window_in_days=260.0,
-                 trading_lag=1, no_naked_short=True, max_out_cash=False):
+                 trading_lag=1, no_naked_short=True, max_out_cash=False, warn=True):
 
         # initialize settings
         self.region = region
@@ -44,6 +39,11 @@ class traderBot():
         self.no_naked_short = no_naked_short
         self.risk_target = risk_target
         self.max_out_cash = max_out_cash  # override risk target; always max out cash usage
+        self.warn = warn # whether to set a y/n manual input before rebalancing
+
+        # initialiaze logger
+        self.initialize_logging()
+
 
         # initialize data members
         self.data = dataBot(region=self.region, home=self.home)
@@ -62,17 +62,37 @@ class traderBot():
         self.covgen()
         self.viewgen()
 
+    # initialize logging
+    def initialize_logging(self):
+        logger = logging.getLogger('tradeBot logger')
+        logger.setLevel(logging.DEBUG)
+        file_path = 'h:\\traderBot_log\\' + datetime.date.today().strftime('%Y-%m-%d.log')
+        fh = logging.FileHandler(file_path)
+        fh.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+        self.logger = logger
+
     # master function for rebalancing
     def rebalance(self):
         trade_df = self.tradegen()
         print('Rebalancing from ... to ...')
-        print (trade_df)
+        print(trade_df)
+
+        if self.warn:
+            keyboard_input = input('Proceed with rebalancing? (y/n): ')
+            if keyboard_input.upper() == 'N':
+                return
+            elif keyboard_input.upper() not in ['Y', 'N']:
+                raise ValueError('Input not y/n!')
 
         portfolio_diff = trade_df['trade']
+        portfolio_diff = portfolio_diff.sort_values(inplace=False)
 
         # generate executable orders in format
         # (currency to buy, currency to sell, amount in buy currency, amount in sell currency)
-        print ('Breaking trade down into executable orders...')
+        self.logger.info ('Breaking trade down into executable orders...')
         orders = []
         for currency in [x for x in portfolio_diff.index if x != self.home]:
             buy_currency = None
@@ -92,10 +112,9 @@ class traderBot():
             orders.append((buy_currency, sell_currency, buy_amount, sell_amount))
 
         # execute all trades
-        eb = executionBot(orders=orders)
-        all_orders_filled = eb.execute_all_orders_on_polo()
+        eb = executionBot(orders=orders, logger=self.logger)
 
-        return all_orders_filled
+        return
 
 
     # daily asset returns series for backtest
@@ -146,26 +165,25 @@ class traderBot():
         return -self.get_daily_asset_returns().rolling(window=window, min_periods=window - 5).skew()
 
     def covgen(self):
-        print('Running covgen')
+        self.logger.info('Running covgen')
         cov_matrix_panel = {}
         for date in self.dates:
-            _print_date_every_year(date)
             cov_matrix_panel[date] = self.get_risk_model_one_date(date=date)
         self.cov = pd.Panel(cov_matrix_panel)
 
     def viewgen(self):
         view_panel = {}
 
-        print('Running factor viewgen')
+        self.logger.info('Running factor viewgen')
         for factor_name in self.factors.keys():
-            print('...', factor_name)
+            self.logger.info('...' + factor_name)
             factor_values = self.factors[factor_name]
             views = factor_values
             vols = self.compute_portfolio_vol(views)
             views = views.divide(vols, axis=0).fillna(0) * self.risk_target
             view_panel[factor_name] = views.reindex(self.dates)
 
-        print('Running portfolio viewgen')
+        self.logger.info('Running portfolio viewgen')
         view = 0
         for factor_name in self.factor_weights.keys():
             view += view_panel[factor_name] * self.factor_weights[factor_name]
@@ -228,7 +246,8 @@ class traderBot():
         nav_in_home_currency = position_dict['home currency'].sum()
         prices = position_dict['prices']
         current_positions_in_local_currency = position_dict['local currency']
-        current_view_in_local_currency = current_view.multiply(nav_in_home_currency).divide(prices).dropna()
+        current_view_in_home_currency = current_view.multiply(nav_in_home_currency).dropna()
+        current_view_in_local_currency = current_view_in_home_currency.divide(prices).dropna()
 
         if not set(current_view_in_local_currency.index).issubset(set(current_positions_in_local_currency.index)):
             raise ValueError('Currency found not tradable!!')
@@ -236,6 +255,12 @@ class traderBot():
         df = pd.DataFrame({
             'current': current_positions_in_local_currency,
             'desired': current_view_in_local_currency,
+            'desired in BTC': current_view_in_home_currency
         }).dropna()
         df['trade'] = df['desired'] - df['current']
         return df
+
+
+if __name__ == "__main__":
+    tb = traderBot(warn=False)
+    tb.rebalance()

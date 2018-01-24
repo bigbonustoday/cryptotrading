@@ -45,10 +45,8 @@ class dataBot():
 
     def get_intraday_data(self):
         if self.intraday_ti is None:
-            print('Loading OHLC, volume data for')
             data_panel = {}
             for currency in self.region:
-                print('...', currency)
                 data_panel[currency] = self._get_bars(currency)
             data_panel = pd.DataFrame(data_panel)
             self.intraday_ti = data_panel

@@ -13,12 +13,22 @@ polo = polo_api.poloniex(APIKey=POLO_KEY, Secret=POLO_SECRET)
 
 
 class executionBot():
-    def __init__(self, orders):
+    def __init__(self, orders, logger):
         # trades: list of tuples in the following format
         # (currency to buy, currency to sell, amount in buy currency, amount in sell currency)
         self.orders = orders
+        self.logger = logger
+
+        self.buy_orders = [order for order in orders if order[3] is None]
+        self.sell_orders = [order for order in orders if order[2] is None]
+
         self.check_order_validity()
 
+        # execute all sell orders
+        self.logger.info('===Executing all sell orders===')
+        self.execute_orders_on_polo(order_list=self.sell_orders)
+        self.logger.info('===Executing all buy orders===')
+        self.execute_orders_on_polo(order_list=self.buy_orders)
 
     def check_order_validity(self):
         for order in self.orders:
@@ -30,32 +40,35 @@ class executionBot():
             if order[3] is not None:
                 assert order[3] > 0
 
-    def execute_all_orders_on_polo(self):
-        print(str(len(self.orders)) + ' orders received!')
+        assert len(self.buy_orders) + len(self.sell_orders) == len(self.orders)
+
+    def execute_orders_on_polo(self, order_list, max_wait_time_in_minutes=60):
+        self.logger.info(str(len(order_list)) + ' orders received!')
 
         order_numbers = []
-        for order in self.orders:
+        for order in order_list:
             order_number = self.send_single_order_on_polo(order=order)
             if order_number is not None:
                 order_numbers.append(order_number)
 
-        print (str(len(order_numbers)) + ' order(s) placed!')
 
-        filled_orders_count = 0
-        for attempt in range(1, 60):
-            if len(order_numbers) > 0:
-                print('Attempt #' + str(attempt) + 'Sleep for 60s for order execution...')
-                time.sleep(seconds=60)
-                for order_number in order_numbers:
-                    status = polo.returnOrderTrades(orderNumber=order_number)
-                    # TODO: is order filled?
-                    if order_is_filled:
-                        order_numbers.remove(order_number)
-                        filled_orders_count += 1
+        number_of_orders_placed = len(order_numbers)
+
+        self.logger.info(str(number_of_orders_placed) + ' order(s) placed!')
+
+        number_of_open_orders = len(order_numbers)
+        for attempt in range(1, max_wait_time_in_minutes + 1):
+            if number_of_open_orders > 0:
+                self.logger.info('Attempt #' + str(attempt) + ': ' + str(number_of_open_orders) + ' order(s) remain unfilled')
+                time.sleep(60)
+                status = polo.returnOpenOrders(currencyPair='all')
+                number_of_open_orders = sum([len(status[cp]) for cp in status.keys()])
             else:
                 break
 
-        print(str(filled_orders_count) + ' order(s) filled!')
+        number_of_orders_filled = number_of_orders_placed - number_of_open_orders
+
+        self.logger.info(str(number_of_orders_filled) + ' order(s) filled!')
 
         return
 
@@ -74,7 +87,7 @@ class executionBot():
         ticker = domestic + '_' + foreign
 
         if ticker_info[ticker]['isFrozen'] != '0':
-            print('Cannot trade ' + ticker + ' due to exchange restriction!')
+            self.logger.info('Cannot trade ' + ticker + ' due to exchange restriction!')
             return
 
         order_type = None
@@ -111,11 +124,11 @@ class executionBot():
         order_description = order_type + ' ' + ticker + ' at ' + str(limit) + ', amount = ' + str(amount)
 
         if 'error' in output.keys():
-            print ('Order error: ' + output['error'])
-            print ('...failed to place order: ' + order_description)
+            self.logger.info ('Order error: ' + output['error'])
+            self.logger.info ('...failed to place order: ' + order_description)
             return None
 
-        print('Order placed #' + str(output['orderNumber']) + ': ' + order_description)
+        self.logger.info('Order placed #' + str(output['orderNumber']) + ': ' + order_description)
 
 
         return output['orderNumber']
