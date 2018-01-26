@@ -13,7 +13,7 @@ GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 GLOBAL_SNAP_TIME = datetime.time(10, 0)
 
 # trading cross section
-POLO_CROSS_SECTION = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB']
+POLO_CROSS_SECTION = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB', 'BTS']
 
 # home currency and hub currencies
 HOME = 'BTC'
@@ -69,9 +69,13 @@ class traderBot():
         file_path = 'h:\\traderBot_log\\' + datetime.date.today().strftime('%Y-%m-%d.log')
         fh = logging.FileHandler(file_path)
         fh.setLevel(logging.DEBUG)
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         fh.setFormatter(formatter)
+        ch.setFormatter(formatter)
         logger.addHandler(fh)
+        logger.addHandler(ch)
         self.logger = logger
 
     # master function for rebalancing
@@ -264,3 +268,4 @@ class traderBot():
 if __name__ == "__main__":
     tb = traderBot(warn=False)
     tb.rebalance()
+

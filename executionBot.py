@@ -9,11 +9,12 @@ import cryptotrading.poloneix_api as polo_api
 
 # load polo account
 from polo_account_info import POLO_KEY, POLO_SECRET
+
 polo = polo_api.poloniex(APIKey=POLO_KEY, Secret=POLO_SECRET)
 
 
 class executionBot():
-    def __init__(self, orders, logger):
+    def __init__(self, orders, logger, debug=False):
         # trades: list of tuples in the following format
         # (currency to buy, currency to sell, amount in buy currency, amount in sell currency)
         self.orders = orders
@@ -25,10 +26,11 @@ class executionBot():
         self.check_order_validity()
 
         # execute all sell orders
-        self.logger.info('===Executing all sell orders===')
-        self.execute_orders_on_polo(order_list=self.sell_orders)
-        self.logger.info('===Executing all buy orders===')
-        self.execute_orders_on_polo(order_list=self.buy_orders)
+        if not debug:
+            self.logger.info('===Executing all sell orders===')
+            self.execute_orders_on_polo(order_list=self.sell_orders)
+            self.logger.info('===Executing all buy orders===')
+            self.execute_orders_on_polo(order_list=self.buy_orders)
 
     def check_order_validity(self):
         for order in self.orders:
@@ -42,39 +44,45 @@ class executionBot():
 
         assert len(self.buy_orders) + len(self.sell_orders) == len(self.orders)
 
-    def execute_orders_on_polo(self, order_list, max_wait_time_in_minutes=180):
+    def execute_orders_on_polo(self, order_list, max_attempts=9, wait_time_in_minutes=20):
         self.logger.info(str(len(order_list)) + ' orders received!')
 
-        order_numbers = []
-        for order in order_list:
-            order_number = self.send_single_order_on_polo(order=order)
-            if order_number is not None:
-                order_numbers.append(order_number)
+        unfilled_order_list = order_list
+        for attempt in range(1, max_attempts + 1):
+            order_numbers_dict = {}
+            for order in unfilled_order_list:
+                order_number = self.send_single_order_on_polo(order=order)
+                if order_number is not None:
+                    order_numbers_dict[order_number] = order
 
+            self.logger.info(
+                'Attempt #' + str(attempt) + ': ' + str(len(order_numbers_dict.keys())) + ' order(s) sent to exchange')
 
-        number_of_orders_placed = len(order_numbers)
+            # wait for orders to be executed
+            time.sleep(60 * wait_time_in_minutes)
 
-        self.logger.info(str(number_of_orders_placed) + ' order(s) placed!')
-
-        number_of_open_orders = len(order_numbers)
-        for attempt in range(1, max_wait_time_in_minutes + 1):
-            if number_of_open_orders > 0:
-                self.logger.info('Attempt #' + str(attempt) + ': ' + str(number_of_open_orders) + ' order(s) remain unfilled')
-                time.sleep(60)
-                status = polo.returnOpenOrders(currencyPair='all')
-                number_of_open_orders = sum([len(status[cp]) for cp in status.keys()])
-            else:
+            # check order status
+            status = polo.returnOpenOrders(currencyPair='all')
+            number_of_open_orders = sum([len(status[cp]) for cp in status.keys()])
+            if number_of_open_orders == 0:
                 break
+            self.logger.info(str(number_of_open_orders) + ' order(s) remain unfilled. Cancelling...')
 
-        number_of_orders_filled = number_of_orders_placed - number_of_open_orders
+            # cancel unfilled orders
+            order_numbers_unfilled = [(cp, status[cp][i]['orderNumber']) for cp in status.keys() for i in range(len(status[cp]))]
+            for cp, order_number in order_numbers_unfilled:
+                polo.cancel(currencyPair=cp, orderNumber=order_number)
+                self.logger.info('...#' + order_number + ' cancelled')
 
+            unfilled_order_list = [order_numbers_dict[order_number] for cp, order_number in order_numbers_unfilled]
+
+
+        number_of_orders_filled = len(order_list) - len(unfilled_order_list)
         self.logger.info(str(number_of_orders_filled) + ' order(s) filled!')
 
         return
 
-
-
-    def send_single_order_on_polo(self, order, limit_x_spread=0.05):
+    def send_single_order_on_polo(self, order, limit_x_spread=0.03):
         ticker_info = polo.returnTicker()
         domestic = None
         foreign = None
@@ -91,7 +99,7 @@ class executionBot():
             return
 
         order_type = None
-        amount = None # in foreign currency
+        amount = None  # in foreign currency
         if order[2] is not None:
             amount = order[2]
             if order[0] == foreign:
@@ -124,13 +132,10 @@ class executionBot():
         order_description = order_type + ' ' + ticker + ' at ' + str(limit) + ', amount = ' + str(amount)
 
         if 'error' in output.keys():
-            self.logger.info ('Order error: ' + output['error'])
-            self.logger.info ('...failed to place order: ' + order_description)
+            self.logger.info('Order error: ' + output['error'])
+            self.logger.info('...failed to place order: ' + order_description)
             return None
 
         self.logger.info('Order placed #' + str(output['orderNumber']) + ': ' + order_description)
 
-
         return output['orderNumber']
-
-
