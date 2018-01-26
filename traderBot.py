@@ -13,7 +13,7 @@ GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 GLOBAL_SNAP_TIME = datetime.time(10, 0)
 
 # trading cross section
-POLO_CROSS_SECTION = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB', 'BTS']
+POLO_CROSS_SECTION = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB', 'BTS', 'STR', 'STEEM']
 
 # home currency and hub currencies
 HOME = 'BTC'
