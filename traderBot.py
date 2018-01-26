@@ -1,9 +1,9 @@
 from cryptotrading.dataBot import dataBot
 from cryptotrading.executionBot import executionBot
+from cryptotrading.emailer import send_email
+from cryptotrading.logger_builder import logger
 import pandas as pd
 import datetime
-import numpy as np
-import logging
 from pandas.tseries.offsets import BDay
 
 # global backtest start date
@@ -64,18 +64,6 @@ class traderBot():
 
     # initialize logging
     def initialize_logging(self):
-        logger = logging.getLogger('tradeBot logger')
-        logger.setLevel(logging.DEBUG)
-        file_path = 'h:\\traderBot_log\\' + datetime.date.today().strftime('%Y-%m-%d.log')
-        fh = logging.FileHandler(file_path)
-        fh.setLevel(logging.DEBUG)
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        fh.setFormatter(formatter)
-        ch.setFormatter(formatter)
-        logger.addHandler(fh)
-        logger.addHandler(ch)
         self.logger = logger
 
     # master function for rebalancing
@@ -266,6 +254,10 @@ class traderBot():
 
 
 if __name__ == "__main__":
-    tb = traderBot(warn=False)
-    tb.rebalance()
+    try:
+        tb = traderBot(warn=False)
+        tb.rebalance()
+    except:
+        logger.info('Fatal failure!!!')
+    send_email()
 

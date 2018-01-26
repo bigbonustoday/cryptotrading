@@ -6,6 +6,7 @@ import time
 # takes trades and execute them
 
 import cryptotrading.poloneix_api as polo_api
+from cryptotrading.logger_builder import logger
 
 # load polo account
 from polo_account_info import POLO_KEY, POLO_SECRET
@@ -14,7 +15,7 @@ polo = polo_api.poloniex(APIKey=POLO_KEY, Secret=POLO_SECRET)
 
 
 class executionBot():
-    def __init__(self, orders, logger, debug=False):
+    def __init__(self, orders, debug=False):
         # trades: list of tuples in the following format
         # (currency to buy, currency to sell, amount in buy currency, amount in sell currency)
         self.orders = orders
