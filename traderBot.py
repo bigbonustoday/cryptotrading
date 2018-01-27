@@ -10,7 +10,7 @@ from pandas.tseries.offsets import BDay
 GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 
 # global daily price snap time
-GLOBAL_SNAP_TIME = datetime.time(10, 0)
+GLOBAL_SNAP_TIME = datetime.time(9, 1)
 
 # trading cross section
 POLO_CROSS_SECTION = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB', 'BTS', 'STR', 'STEEM']
@@ -20,6 +20,7 @@ HOME = 'BTC'
 
 SECONDS_IN_A_YEAR = 365.0 * 24.0 * 3600.0
 EPSILON = 10 ** -6
+TRADING_FREQ = 'D'
 
 MIN_NUM_OF_RETURNS_FOR_COV = 500.0
 
@@ -49,7 +50,7 @@ class traderBot():
         self.data = dataBot(region=self.region, home=self.home)
         self.start_date = GLOBAL_START_DATE
         self.end_date = datetime.date.today()
-        self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq='B')
+        self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq=TRADING_FREQ)
         self.factor_weights = pd.Series({
             'mom 1w': 0.67,
             'mom 1m': 0.33
@@ -112,7 +113,7 @@ class traderBot():
     # daily asset returns series for backtest
     def get_daily_asset_returns(self):
         intraday_ti = self.get_intraday_ti()
-        daily_ti = intraday_ti[intraday_ti.index.time <= GLOBAL_SNAP_TIME].resample('B').last()
+        daily_ti = intraday_ti[intraday_ti.index.time <= GLOBAL_SNAP_TIME].resample(TRADING_FREQ).last()
         daily_returns = daily_ti.fillna(method='pad', limit=5).pct_change()
         return daily_returns
 
@@ -232,6 +233,10 @@ class traderBot():
 
     # generate portfolio trades from current holdings
     def tradegen(self, date=datetime.date.today()):
+        if date not in self.views['PORT'].index:
+            err_msg = 'PORT views not available for ' + date.strftime('%Y-%m-%d')
+            self.logger.critical(err_msg)
+            raise IndexError(err_msg)
         current_view = self.views['PORT'].ix[date]
         position_dict = self.data.get_current_positions()
 
@@ -258,13 +263,8 @@ class traderBot():
         self.logger.info('Current balance in BTC = ' + str(round(nav_in_home_currency, 4)))
 
 if __name__ == "__main__":
-    try:
-        tb = traderBot(warn=False)
-        tb.rebalance()
-        tb.log_current_balance()
-
-    except:
-        logger.info('Fatal failure!!!')
-
+    tb = traderBot(warn=False)
+    tb.rebalance()
+    tb.log_current_balance()
     send_email()
 
