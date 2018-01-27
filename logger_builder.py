@@ -13,3 +13,5 @@ fh.setFormatter(formatter)
 ch.setFormatter(formatter)
 logger.addHandler(fh)
 logger.addHandler(ch)
+
+logger.info('logger initiated')

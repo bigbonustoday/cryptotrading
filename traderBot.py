@@ -104,7 +104,7 @@ class traderBot():
             orders.append((buy_currency, sell_currency, buy_amount, sell_amount))
 
         # execute all trades
-        eb = executionBot(orders=orders, logger=self.logger)
+        eb = executionBot(orders=orders)
 
         return
 
@@ -257,7 +257,9 @@ if __name__ == "__main__":
     try:
         tb = traderBot(warn=False)
         tb.rebalance()
+
     except:
         logger.info('Fatal failure!!!')
+
     send_email()
 

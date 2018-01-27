@@ -65,9 +65,7 @@ class executionBot():
             # check order status
             status = polo.returnOpenOrders(currencyPair='all')
             number_of_open_orders = sum([len(status[cp]) for cp in status.keys()])
-            if number_of_open_orders == 0:
-                break
-            self.logger.info(str(number_of_open_orders) + ' order(s) remain unfilled. Cancelling...')
+            self.logger.info(str(number_of_open_orders) + ' order(s) remain unfilled.')
 
             # cancel unfilled orders
             order_numbers_unfilled = [(cp, status[cp][i]['orderNumber']) for cp in status.keys() for i in range(len(status[cp]))]
@@ -76,7 +74,8 @@ class executionBot():
                 self.logger.info('...#' + order_number + ' cancelled')
 
             unfilled_order_list = [order_numbers_dict[order_number] for cp, order_number in order_numbers_unfilled]
-
+            if len(unfilled_order_list) == 0:
+                break
 
         number_of_orders_filled = len(order_list) - len(unfilled_order_list)
         self.logger.info(str(number_of_orders_filled) + ' order(s) filled!')
