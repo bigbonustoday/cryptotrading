@@ -252,11 +252,16 @@ class traderBot():
         df['trade'] = df['desired'] - df['current']
         return df
 
+    def log_current_balance(self):
+        position_dict = self.data.get_current_positions()
+        nav_in_home_currency = position_dict['home currency'].sum()
+        self.logger.info('Current balance in BTC = ' + str(round(nav_in_home_currency, 4)))
 
 if __name__ == "__main__":
     try:
         tb = traderBot(warn=False)
         tb.rebalance()
+        tb.log_current_balance()
 
     except:
         logger.info('Fatal failure!!!')
