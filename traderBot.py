@@ -14,7 +14,8 @@ GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 GLOBAL_SNAP_TIME = datetime.time(9, 1)
 
 # trading cross section
-POLO_CROSS_SECTION = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB', 'BTS', 'STR', 'STEEM']
+POLO_CROSS_SECTION = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB', 'BTS', 'STR', 'STEEM', 'DOGE',
+                      'XEM', 'ETC', 'SC', 'XMR', 'BCH', 'ZRX', 'OMG', 'STRAT', 'ZEC', 'LSK', 'VIA']
 
 # home currency and hub currencies
 HOME = 'BTC'
@@ -30,7 +31,8 @@ MIN_NUM_OF_RETURNS_FOR_COV = 500.0
 class traderBot():
     def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00, data_frequency_in_seconds=7200.0,
                  cov_window_in_days=260.0,
-                 trading_lag=1, no_naked_short=True, max_out_cash=False):
+                 trading_lag=1, no_naked_short=True, force_max_out_cash=False,
+                 leverage_cap=0.98):
 
         # initialize settings
         self.region = region
@@ -40,7 +42,8 @@ class traderBot():
         self.lag = trading_lag
         self.no_naked_short = no_naked_short
         self.risk_target = risk_target
-        self.max_out_cash = max_out_cash  # override risk target; always max out cash usage
+        self.force_max_out_cash = force_max_out_cash  # override risk target; always max out cash usage
+        self.leverage_cap = leverage_cap
 
         # initialiaze logger
         self.initialize_logging()
@@ -207,14 +210,16 @@ class traderBot():
         view = view.divide(vols, axis=0).multiply(self.risk_target)
         view = view.fillna(0)
 
-        # cap leverage at 1.00
+        # cap leverage
         leverage = view.sum(1)
-        leverage[leverage < 1.00] = 1.00
-        view = view.divide(leverage, axis=0).multiply(1.00).fillna(0)
+        leverage[leverage > self.leverage_cap] = self.leverage_cap
 
-        # home currency view
-        if self.max_out_cash:
-            view = view.divide(view.sum(1), axis=0).multiply(1.00).fillna(0)
+        # force max out cash
+        if self.force_max_out_cash:
+            leverage = self.leverage_cap
+
+        leverage_cap_scalar = leverage / view.sum(1)
+        view = view.multiply(leverage_cap_scalar, axis=0).fillna(0)
 
         view[self.home] = 1 - view.sum(1)
 
@@ -271,6 +276,13 @@ class traderBot():
             'desired in BTC': current_view_in_home_currency
         }).dropna()
         df['trade'] = df['desired'] - df['current']
+
+        # check region completeness
+        if set(df.index) != set(self.region):
+            missed_currency = list(set(self.region) - set(df.index))
+            err_msg = 'desired views missing currency(s) - ' + str(missed_currency)
+            self.logger.critical(err_msg)
+            raise IndexError(err_msg)
         return df
 
     def log_current_balance(self):
