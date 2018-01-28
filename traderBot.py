@@ -2,6 +2,7 @@ from cryptotrading.dataBot import dataBot
 from cryptotrading.executionBot import executionBot
 from cryptotrading.emailer import send_email
 from cryptotrading.logger_builder import logger
+import numpy as np
 import pandas as pd
 import datetime
 from pandas.tseries.offsets import BDay
@@ -29,7 +30,7 @@ MIN_NUM_OF_RETURNS_FOR_COV = 500.0
 class traderBot():
     def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00, data_frequency_in_seconds=7200.0,
                  cov_window_in_days=260.0,
-                 trading_lag=1, no_naked_short=True, max_out_cash=False, warn=True):
+                 trading_lag=1, no_naked_short=True, max_out_cash=False):
 
         # initialize settings
         self.region = region
@@ -40,7 +41,6 @@ class traderBot():
         self.no_naked_short = no_naked_short
         self.risk_target = risk_target
         self.max_out_cash = max_out_cash  # override risk target; always max out cash usage
-        self.warn = warn # whether to set a y/n manual input before rebalancing
 
         # initialiaze logger
         self.initialize_logging()
@@ -68,12 +68,13 @@ class traderBot():
         self.logger = logger
 
     # master function for rebalancing
-    def rebalance(self):
+    def rebalance(self, warn=True):
         trade_df = self.tradegen()
         print('Rebalancing from ... to ...')
         print(trade_df)
 
-        if self.warn:
+        # whether to set a y/n manual input before rebalancing
+        if warn:
             keyboard_input = input('Proceed with rebalancing? (y/n): ')
             if keyboard_input.upper() == 'N':
                 return
@@ -164,16 +165,31 @@ class traderBot():
             cov_matrix_panel[date] = self.get_risk_model_one_date(date=date)
         self.cov = pd.Panel(cov_matrix_panel)
 
+    def get_asset_vols(self):
+        if self.cov is None:
+            self.covgen()
+        cov = self.cov
+        asset_vols = pd.DataFrame({date: pd.Series(np.diag(cov[date]), index=cov[date].columns)
+                                  for date in cov.items})
+        return asset_vols.T.drop(self.home, axis=1)
+
     def viewgen(self):
         view_panel = {}
 
         self.logger.info('Running factor viewgen')
         for factor_name in self.factors.keys():
             self.logger.info('...' + factor_name)
-            factor_values = self.factors[factor_name]
-            views = factor_values
+            factor_values = self.factors[factor_name].drop(self.home, axis=1) # drop home currency because view is
+            # meaningless
+
+            # grinold
+            asset_vols = self.get_asset_vols()
+            views = factor_values.divide(asset_vols, axis=1)
+
+            # risk targeting
             vols = self.compute_portfolio_vol(views)
             views = views.divide(vols, axis=0).fillna(0) * self.risk_target
+
             view_panel[factor_name] = views.reindex(self.dates)
 
         self.logger.info('Running portfolio viewgen')
@@ -263,8 +279,8 @@ class traderBot():
         self.logger.info('Current balance in BTC = ' + str(round(nav_in_home_currency, 4)))
 
 if __name__ == "__main__":
-    tb = traderBot(warn=False)
-    tb.rebalance()
+    tb = traderBot()
+    tb.rebalance(warn=False)
     tb.log_current_balance()
     send_email()
 
