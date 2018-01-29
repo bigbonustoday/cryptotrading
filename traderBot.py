@@ -289,10 +289,3 @@ class traderBot():
         position_dict = self.data.get_current_positions()
         nav_in_home_currency = position_dict['home currency'].sum()
         self.logger.info('Current balance in BTC = ' + str(round(nav_in_home_currency, 4)))
-
-if __name__ == "__main__":
-    tb = traderBot()
-    tb.rebalance(warn=False)
-    tb.log_current_balance()
-    send_email()
-
