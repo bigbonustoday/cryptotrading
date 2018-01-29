@@ -1,6 +1,5 @@
 from cryptotrading.traderBot import traderBot
 from cryptotrading.emailer import send_email
-import time
 import argparse
 
 def run_portfolio_rebalance():
