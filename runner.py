@@ -1,5 +1,6 @@
 from cryptotrading.traderBot import traderBot
 from cryptotrading.emailer import send_email
+import time
 import argparse
 
 def run_portfolio_rebalance():
@@ -11,7 +12,7 @@ def run_portfolio_rebalance():
 def test_portfolio_rebalance():
     tb = traderBot()
     print(tb.tradegen())
-
+    input('Press Enter to exit...')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
