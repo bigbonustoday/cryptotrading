@@ -76,6 +76,12 @@ class traderBot():
         print('Rebalancing from ... to ...')
         print(trade_df)
 
+        covcorrel_dict = self.get_covcorrel_and_vol(trade_df['current positions'],
+                                                    trade_df['desired positions'])
+        logger.info('Changing portfolio ex-ante vol from {vol1} to {vol2}'.format(
+            vol1=str(round(covcorrel_dict['vol1'], 3)), vol2=str(round(covcorrel_dict['vol2'], 3))))
+        logger.info('covcorrel = {covcorrel}'.format(covcorrel=str(round(covcorrel_dict['covcorrel'], 3))))
+
         # whether to set a y/n manual input before rebalancing
         if warn:
             keyboard_input = input('Proceed with rebalancing? (y/n): ')
@@ -136,6 +142,8 @@ class traderBot():
 
         # annualize
         annualizer = SECONDS_IN_A_YEAR / self.freq
+
+        # TODO: add support for EWMA
         cov_matrix = sliced_ti.pct_change().cov() * annualizer
         return cov_matrix
 
@@ -273,7 +281,8 @@ class traderBot():
         df = pd.DataFrame({
             'current': current_positions_in_local_currency,
             'desired': current_view_in_local_currency,
-            'desired in BTC': current_view_in_home_currency
+            'current positions': position_dict['home currency'] / nav_in_home_currency,
+            'desired positions': current_view
         }).dropna()
         df['trade'] = df['desired'] - df['current']
 
@@ -289,3 +298,27 @@ class traderBot():
         position_dict = self.data.get_current_positions()
         nav_in_home_currency = position_dict['home currency'].sum()
         self.logger.info('Current balance in BTC = ' + str(round(nav_in_home_currency, 4)))
+
+    def get_covcorrel_and_vol(self, view1, view2, cov_date=datetime.date.today()):
+        if self.cov is None:
+            self.covgen()
+        cov = self.cov[cov_date]
+
+        view1_valid = set(view1.index).issubset(set(self.cov[cov_date].index))
+        view2_valid = set(view2.index).issubset(set(self.cov[cov_date].index))
+        if not (view1_valid and view2_valid):
+            err_msg = 'views contain invalid coins!'
+            logger.critical(err_msg)
+            raise ValueError(err_msg)
+
+        vol1 = (view1.dot(cov).dot(view1)) ** 0.5
+        vol2 = (view2.dot(cov).dot(view2)) ** 0.5
+        covar = (view1.dot(cov).dot(view2))
+        correl = covar / (vol1 * vol2)
+
+        return {
+            'vol1': vol1,
+            'vol2': vol2,
+            'covcorrel': correl
+        }
+    
