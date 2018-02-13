@@ -14,8 +14,12 @@ GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 GLOBAL_SNAP_TIME = datetime.time(9, 1)
 
 # trading cross section
-POLO_CROSS_SECTION = ['BTC', 'ETH', 'XRP', 'LTC', 'DASH', 'DGB', 'BTS', 'STR', 'STEEM', 'DOGE',
-                      'XEM', 'ETC', 'SC', 'XMR', 'BCH', 'ZRX', 'OMG', 'STRAT', 'ZEC', 'LSK', 'VIA']
+POLO_CROSS_SECTION = ['BTC', 'AMP', 'ARDR', 'BCH', 'BCN', 'BCY', 'BELA', 'BLK', 'BTCD', 'BTM', 'BTS', 'BURST', 'CLAM',
+                      'CVC', 'DASH', 'DCR', 'DGB', 'DOGE', 'EMC2', 'ETC', 'ETH', 'EXP', 'FCT', 'FLDC', 'FLO', 'GAME',
+                      'GAS', 'GNO', 'GNT', 'GRC', 'HUC', 'LBC', 'LSK', 'LTC', 'MAID', 'NAV', 'NEOS', 'NMC','NXC',
+                      'NXT', 'OMG', 'OMNI', 'PASC', 'PINK', 'POT', 'PPC', 'RADS', 'REP', 'RIC', 'SBD', 'SC', 'STEEM',
+                      'STORJ', 'STR', 'STRAT', 'SYS', 'VIA', 'VRC', 'VTC', 'XBC', 'XCP', 'XEM', 'XMR', 'SPM', 'XRP',
+                      'XVC', 'ZEC', 'ZRX']
 
 # home currency and hub currencies
 HOME = 'BTC'
@@ -321,4 +325,3 @@ class traderBot():
             'vol2': vol2,
             'covcorrel': correl
         }
-    
