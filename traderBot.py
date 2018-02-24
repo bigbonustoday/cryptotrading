@@ -59,8 +59,8 @@ class traderBot():
         self.end_date = datetime.date.today()
         self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq=TRADING_FREQ)
         self.factor_weights = pd.Series({
-            'mom 1w': 0.67,
-            'mom 1m': 0.33
+            'mom 1w': 0.00,
+            'mom 1m': 1.00
         })
         self.factors = {}
         self.cov = None
@@ -156,6 +156,17 @@ class traderBot():
         # mom
         self.factors['mom 1w'] = self.compute_ewma_mom_factor(com=5)
         self.factors['mom 1m'] = self.compute_ewma_mom_factor(com=20)
+        self.factors['mom 3m'] = self.compute_ewma_mom_factor(com=60)
+
+        # centered skew
+        self.factors['skew 1w'] = self.compute_skew_factor(window=5, skew_type='centered')
+        self.factors['skew 1m'] = self.compute_skew_factor(window=20, skew_type='centered')
+        self.factors['skew 3m'] = self.compute_skew_factor(window=60, skew_type='centered')
+
+        # adjusted skew
+        self.factors['adj skew 1w'] = self.compute_skew_factor(window=5, skew_type='adjusted')
+        self.factors['adj skew 1m'] = self.compute_skew_factor(window=20, skew_type='adjusted')
+        self.factors['adj skew 3m'] = self.compute_skew_factor(window=60, skew_type='adjusted')
 
         if not set(self.factor_weights.keys()).issubset(set(self.factors.keys())):
             raise ValueError('Undefined factor(s) found!')
@@ -170,8 +181,18 @@ class traderBot():
         return -self.get_daily_asset_returns().rolling(window=window, min_periods=window - 5, center=False).std()
 
     # skew
-    def compute_skew_factor(self, window):
-        return -self.get_daily_asset_returns().rolling(window=window, min_periods=window - 5).skew()
+    def compute_skew_factor(self, window, skew_type):
+        signal = None
+        daily_returns = self.get_daily_asset_returns()
+        if skew_type == 'centered':
+            signal = daily_returns.rolling(window=window, min_periods=window - 5).skew()
+        elif skew_type == 'adjusted':
+            m4 = (daily_returns ** 4).rolling(window=window, min_periods=window - 5).sum()
+            m3 = (daily_returns ** 3).rolling(window=window, min_periods=window - 5).sum()
+            m2 = (daily_returns ** 2).rolling(window=window, min_periods=window - 5).sum()
+            m1 = (daily_returns ** 1).rolling(window=window, min_periods=window - 5).sum()
+            signal = (m3 - m4 / m2 * m1) / m2 ** 1.5
+        return signal
 
     def covgen(self):
         self.logger.info('Running covgen')
@@ -252,7 +273,7 @@ class traderBot():
         return vols
 
     # compute gross/net portfolio returns, assuming 1% tcost
-    def compute_portfolio_returns(self, rebal_rule='W', unit_tcost=0.01):
+    def compute_portfolio_returns(self, rebal_rule='W', unit_tcost=0.0025):
         net_returns = pd.DataFrame()
         for port in self.views.keys():
             views = self.views[port].resample(rebal_rule).last()
