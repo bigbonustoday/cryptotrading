@@ -7,6 +7,18 @@ import pandas as pd
 import datetime
 from pandas.tseries.offsets import BDay
 
+# CONSTANTS - these should almost never be changed!!!
+SECONDS_IN_A_YEAR = 365.0 * 24.0 * 3600.0
+EPSILON = 10 ** -6
+VIEWGEN_FREQ = 'D'
+FREQ_DICT = {
+    'D': 365,
+    'B': 260,
+    'W': 52,
+    'BM': 12
+}
+
+# PARAMETERS
 # global backtest start date
 GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 
@@ -24,24 +36,48 @@ POLO_CROSS_SECTION = ['BTC', 'AMP', 'ARDR', 'BCH', 'BCN', 'BCY', 'BELA', 'BLK', 
 # home currency and hub currencies
 HOME = 'BTC'
 
-SECONDS_IN_A_YEAR = 365.0 * 24.0 * 3600.0
-EPSILON = 10 ** -6
-TRADING_FREQ = 'D'
-
+# cov related
 MIN_NUM_OF_RETURNS_FOR_COV = 500.0
+
+
+# factor research helpers
+
+def get_sharpe_ratios(ret, freq):
+    return ret.mean() / ret.std() * FREQ_DICT[freq] ** 0.5
+
+def get_factor_return_stats(ret_dict):
+    net_returns = ret_dict['net']
+    gross_returns_by_pair_dict = ret_dict['gross by pair']
+
+    freq = pd.infer_freq(net_returns.index)
+
+    net_sharpes = get_sharpe_ratios(net_returns, freq)
+    factor_stats = pd.DataFrame({
+        factor: pd.Series({
+            'full net sharpe': net_sharpes[factor],
+            'pair gross sharpe mean': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).mean(),
+            'pair gross sharpe std': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).std(),
+            'pair gross sharpe bottom 10%': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).quantile(0.1),
+            'pair gross sharpe min': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).min()
+                          })
+        for factor in gross_returns_by_pair_dict.keys()
+    })
+    return factor_stats
+
 
 
 # main tradebot class
 class traderBot():
-    def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00, data_frequency_in_seconds=7200.0,
-                 cov_window_in_days=260.0,
+    def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00, price_data_frequency_in_seconds=7200.0,
+                 cov_window_in_days=260.0, viewgen_freq = VIEWGEN_FREQ,
                  trading_lag=1, no_naked_short=True, force_max_out_cash=False,
                  leverage_cap=0.98):
 
         # initialize settings
         self.region = region
         self.home = home
-        self.freq = data_frequency_in_seconds
+        self.viewgen_freq = viewgen_freq
+        self.price_data_freq = price_data_frequency_in_seconds
         self.cov_window = cov_window_in_days
         self.lag = trading_lag
         self.no_naked_short = no_naked_short
@@ -57,10 +93,13 @@ class traderBot():
         self.data = dataBot(region=self.region, home=self.home)
         self.start_date = GLOBAL_START_DATE
         self.end_date = datetime.date.today()
-        self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq=TRADING_FREQ)
+        self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.viewgen_freq)
         self.factor_weights = pd.Series({
-            'mom 1w': 0.67,
-            'mom 1m': 0.33
+            'vmom 1m': 0.12,
+            'vmom 3m': 0.48,
+            'mom 1m': 0.04,
+            'mom 3m': 0.16,
+            'adj skew 3m': 0.20
         })
         self.factors = {}
         self.cov = None
@@ -127,13 +166,19 @@ class traderBot():
     # daily asset returns series for backtest
     def get_daily_asset_returns(self):
         intraday_ti = self.get_intraday_ti()
-        daily_ti = intraday_ti[intraday_ti.index.time <= GLOBAL_SNAP_TIME].resample(TRADING_FREQ).last()
+        daily_ti = intraday_ti[intraday_ti.index.time <= GLOBAL_SNAP_TIME].resample(self.viewgen_freq).last()
         daily_returns = daily_ti.fillna(method='pad', limit=5).pct_change()
         return daily_returns
 
+    # daily trading volume in home currency
+    def get_daily_volume(self):
+        intraday_volume = self.data.get_intraday_data().loc[:, :, 'volume']
+        daily_volume = intraday_volume.resample(self.viewgen_freq).sum()
+        return daily_volume
+
     # public method to get raw intraday total return index
     def get_intraday_ti(self):
-        return self.data.get_intraday_data()
+        return self.data.get_intraday_data().loc[:, :, 'close']
 
     # compute variance covariance matrix for one date
     def get_risk_model_one_date(self, date, window=None):
@@ -145,7 +190,7 @@ class traderBot():
         sliced_ti = sliced_ti.T[sliced_ti.count(0) > MIN_NUM_OF_RETURNS_FOR_COV].T
 
         # annualize
-        annualizer = SECONDS_IN_A_YEAR / self.freq
+        annualizer = SECONDS_IN_A_YEAR / self.price_data_freq
 
         # TODO: add support for EWMA
         cov_matrix = sliced_ti.pct_change().cov() * annualizer
@@ -154,24 +199,75 @@ class traderBot():
     # load factor values
     def load_factors(self):
         # mom
-        self.factors['mom 1w'] = self.compute_ewma_mom_factor(com=5)
-        self.factors['mom 1m'] = self.compute_ewma_mom_factor(com=20)
+        self.factors['mom 1w'] = self.compute_ewma_mom_factor(com=5, mom_type='ewma')
+        self.factors['mom 1m'] = self.compute_ewma_mom_factor(com=20, mom_type='ewma')
+        self.factors['mom 3m'] = self.compute_ewma_mom_factor(com=60, mom_type='ewma')
+
+        # volume-weighted mom
+        self.factors['vmom 1w'] = self.compute_ewma_mom_factor(com=5, mom_type='ewma + volume')
+        self.factors['vmom 1m'] = self.compute_ewma_mom_factor(com=20, mom_type='ewma + volume')
+        self.factors['vmom 3m'] = self.compute_ewma_mom_factor(com=60, mom_type='ewma + volume')
+
+        # log volume-weighted mom
+        self.factors['lvmom 1w'] = self.compute_ewma_mom_factor(com=5, mom_type='ewma + log volume')
+        self.factors['lvmom 1m'] = self.compute_ewma_mom_factor(com=20, mom_type='ewma + log volume')
+        self.factors['lvmom 3m'] = self.compute_ewma_mom_factor(com=60, mom_type='ewma + log volume')
+
+        # centered skew
+        self.factors['skew 1w'] = self.compute_skew_factor(window=5, skew_type='centered')
+        self.factors['skew 1m'] = self.compute_skew_factor(window=20, skew_type='centered')
+        self.factors['skew 3m'] = self.compute_skew_factor(window=60, skew_type='centered')
+
+        # adjusted skew
+        self.factors['adj skew 1w'] = self.compute_skew_factor(window=5, skew_type='adjusted')
+        self.factors['adj skew 1m'] = self.compute_skew_factor(window=20, skew_type='adjusted')
+        self.factors['adj skew 3m'] = self.compute_skew_factor(window=60, skew_type='adjusted')
 
         if not set(self.factor_weights.keys()).issubset(set(self.factors.keys())):
             raise ValueError('Undefined factor(s) found!')
         return
 
     # price mom
-    def compute_ewma_mom_factor(self, com):
-        return self.get_daily_asset_returns().ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+    def compute_ewma_mom_factor(self, com, mom_type):
+        daily_returns = self.get_daily_asset_returns()
+        if mom_type == 'ewma':
+            signal = daily_returns.ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+        elif mom_type == 'ewma + volume':
+            daily_volume = self.get_daily_volume()
+            weighted_volume_return = \
+                (daily_returns * daily_volume).ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+            weighted_volume = \
+                daily_volume.ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+            signal = weighted_volume_return / weighted_volume
+        elif mom_type == 'ewma + log volume':
+            daily_volume = self.get_daily_volume()
+            log_daily_volume = np.log(1 + daily_volume)
+            weighted_volume_return = \
+                (daily_returns * log_daily_volume).ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+            weighted_volume = \
+                log_daily_volume.ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+            signal = weighted_volume_return / weighted_volume
+        else:
+            raise ValueError('mom_type not valid!')
+        return signal
 
     # inverse vol
     def compute_inv_vol_factor(self, window):
         return -self.get_daily_asset_returns().rolling(window=window, min_periods=window - 5, center=False).std()
 
     # skew
-    def compute_skew_factor(self, window):
-        return -self.get_daily_asset_returns().rolling(window=window, min_periods=window - 5).skew()
+    def compute_skew_factor(self, window, skew_type):
+        signal = None
+        daily_returns = self.get_daily_asset_returns()
+        if skew_type == 'centered':
+            signal = daily_returns.rolling(window=window, min_periods=window - 5).skew()
+        elif skew_type == 'adjusted':
+            m4 = (daily_returns ** 4).rolling(window=window, min_periods=window - 5).sum()
+            m3 = (daily_returns ** 3).rolling(window=window, min_periods=window - 5).sum()
+            m2 = (daily_returns ** 2).rolling(window=window, min_periods=window - 5).sum()
+            m1 = (daily_returns ** 1).rolling(window=window, min_periods=window - 5).sum()
+            signal = (m3 - m4 / m2 * m1) / m2 ** 1.5
+        return signal
 
     def covgen(self):
         self.logger.info('Running covgen')
@@ -252,17 +348,22 @@ class traderBot():
         return vols
 
     # compute gross/net portfolio returns, assuming 1% tcost
-    def compute_portfolio_returns(self, rebal_rule='W', unit_tcost=0.01):
+    def compute_portfolio_returns(self, rebal_rule='D', unit_tcost=0.0025):
         net_returns = pd.DataFrame()
+        gross_returns_by_pair = {}
         for port in self.views.keys():
             views = self.views[port].resample(rebal_rule).last()
             intraday_ti = self.get_intraday_ti()
             ti = intraday_ti.resample(rebal_rule).last()
             asset_returns = ti.pct_change()
-            gross_returns = asset_returns.multiply(views.shift(self.lag)).sum(1)
+            gross_returns_by_pair[port] = asset_returns.multiply(views.shift(self.lag))
+            gross_returns = gross_returns_by_pair[port].sum(1)
             tcost = views.diff().abs().sum(1) / 2 * unit_tcost
             net_returns[port] = gross_returns - tcost
-        return net_returns
+        return {
+            'net': net_returns,
+            'gross by pair': gross_returns_by_pair
+        }
 
     # generate portfolio trades from current holdings
     def tradegen(self, date=datetime.date.today()):
