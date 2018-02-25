@@ -31,6 +31,37 @@ TRADING_FREQ = 'D'
 MIN_NUM_OF_RETURNS_FOR_COV = 500.0
 
 
+# factor research helpers
+freq_dict = {
+    'D': 365,
+    'B': 260,
+    'W': 52,
+    'BM': 12
+}
+def get_sharpe_ratios(ret, freq):
+    return ret.mean() / ret.std() * freq_dict[freq] ** 0.5
+
+def get_factor_return_stats(ret_dict):
+    net_returns = ret_dict['net']
+    gross_returns_by_pair_dict = ret_dict['gross by pair']
+
+    freq = pd.infer_freq(net_returns.index)
+
+    net_sharpes = get_sharpe_ratios(net_returns, freq)
+    factor_stats = pd.DataFrame({
+        factor: pd.Series({
+            'full net sharpe': net_sharpes[factor],
+            'pair gross sharpe mean': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).mean(),
+            'pair gross sharpe std': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).std(),
+            'pair gross sharpe bottom 10%': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).quantile(0.1),
+            'pair gross sharpe min': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).min()
+                          })
+        for factor in gross_returns_by_pair_dict.keys()
+    })
+    return factor_stats
+
+
+
 # main tradebot class
 class traderBot():
     def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00, data_frequency_in_seconds=7200.0,
@@ -275,15 +306,20 @@ class traderBot():
     # compute gross/net portfolio returns, assuming 1% tcost
     def compute_portfolio_returns(self, rebal_rule='W', unit_tcost=0.0025):
         net_returns = pd.DataFrame()
+        gross_returns_by_pair = {}
         for port in self.views.keys():
             views = self.views[port].resample(rebal_rule).last()
             intraday_ti = self.get_intraday_ti()
             ti = intraday_ti.resample(rebal_rule).last()
             asset_returns = ti.pct_change()
-            gross_returns = asset_returns.multiply(views.shift(self.lag)).sum(1)
+            gross_returns_by_pair[port] = asset_returns.multiply(views.shift(self.lag))
+            gross_returns = gross_returns_by_pair[port].sum(1)
             tcost = views.diff().abs().sum(1) / 2 * unit_tcost
             net_returns[port] = gross_returns - tcost
-        return net_returns
+        return {
+            'net': net_returns,
+            'gross by pair': gross_returns_by_pair
+        }
 
     # generate portfolio trades from current holdings
     def tradegen(self, date=datetime.date.today()):
