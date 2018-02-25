@@ -95,8 +95,11 @@ class traderBot():
         self.end_date = datetime.date.today()
         self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.viewgen_freq)
         self.factor_weights = pd.Series({
-            'mom 1w': 0.00,
-            'mom 1m': 1.00
+            'vmom 1m': 0.12,
+            'vmom 3m': 0.48,
+            'mom 1m': 0.04,
+            'mom 3m': 0.16,
+            'adj skew 3m': 0.20
         })
         self.factors = {}
         self.cov = None
@@ -167,9 +170,15 @@ class traderBot():
         daily_returns = daily_ti.fillna(method='pad', limit=5).pct_change()
         return daily_returns
 
+    # daily trading volume in home currency
+    def get_daily_volume(self):
+        intraday_volume = self.data.get_intraday_data().loc[:, :, 'volume']
+        daily_volume = intraday_volume.resample(self.viewgen_freq).sum()
+        return daily_volume
+
     # public method to get raw intraday total return index
     def get_intraday_ti(self):
-        return self.data.get_intraday_data()
+        return self.data.get_intraday_data().loc[:, :, 'close']
 
     # compute variance covariance matrix for one date
     def get_risk_model_one_date(self, date, window=None):
@@ -190,9 +199,19 @@ class traderBot():
     # load factor values
     def load_factors(self):
         # mom
-        self.factors['mom 1w'] = self.compute_ewma_mom_factor(com=5)
-        self.factors['mom 1m'] = self.compute_ewma_mom_factor(com=20)
-        self.factors['mom 3m'] = self.compute_ewma_mom_factor(com=60)
+        self.factors['mom 1w'] = self.compute_ewma_mom_factor(com=5, mom_type='ewma')
+        self.factors['mom 1m'] = self.compute_ewma_mom_factor(com=20, mom_type='ewma')
+        self.factors['mom 3m'] = self.compute_ewma_mom_factor(com=60, mom_type='ewma')
+
+        # volume-weighted mom
+        self.factors['vmom 1w'] = self.compute_ewma_mom_factor(com=5, mom_type='ewma + volume')
+        self.factors['vmom 1m'] = self.compute_ewma_mom_factor(com=20, mom_type='ewma + volume')
+        self.factors['vmom 3m'] = self.compute_ewma_mom_factor(com=60, mom_type='ewma + volume')
+
+        # log volume-weighted mom
+        self.factors['lvmom 1w'] = self.compute_ewma_mom_factor(com=5, mom_type='ewma + log volume')
+        self.factors['lvmom 1m'] = self.compute_ewma_mom_factor(com=20, mom_type='ewma + log volume')
+        self.factors['lvmom 3m'] = self.compute_ewma_mom_factor(com=60, mom_type='ewma + log volume')
 
         # centered skew
         self.factors['skew 1w'] = self.compute_skew_factor(window=5, skew_type='centered')
@@ -209,8 +228,28 @@ class traderBot():
         return
 
     # price mom
-    def compute_ewma_mom_factor(self, com):
-        return self.get_daily_asset_returns().ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+    def compute_ewma_mom_factor(self, com, mom_type):
+        daily_returns = self.get_daily_asset_returns()
+        if mom_type == 'ewma':
+            signal = daily_returns.ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+        elif mom_type == 'ewma + volume':
+            daily_volume = self.get_daily_volume()
+            weighted_volume_return = \
+                (daily_returns * daily_volume).ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+            weighted_volume = \
+                daily_volume.ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+            signal = weighted_volume_return / weighted_volume
+        elif mom_type == 'ewma + log volume':
+            daily_volume = self.get_daily_volume()
+            log_daily_volume = np.log(1 + daily_volume)
+            weighted_volume_return = \
+                (daily_returns * log_daily_volume).ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+            weighted_volume = \
+                log_daily_volume.ewm(com=com, min_periods=com, adjust=True, ignore_na=False).mean()
+            signal = weighted_volume_return / weighted_volume
+        else:
+            raise ValueError('mom_type not valid!')
+        return signal
 
     # inverse vol
     def compute_inv_vol_factor(self, window):
@@ -309,7 +348,7 @@ class traderBot():
         return vols
 
     # compute gross/net portfolio returns, assuming 1% tcost
-    def compute_portfolio_returns(self, rebal_rule='W', unit_tcost=0.0025):
+    def compute_portfolio_returns(self, rebal_rule='D', unit_tcost=0.0025):
         net_returns = pd.DataFrame()
         gross_returns_by_pair = {}
         for port in self.views.keys():

@@ -8,8 +8,6 @@ import cryptotrading.poloneix_api as polo_api
 from polo_account_info import POLO_KEY, POLO_SECRET
 polo = polo_api.poloniex(APIKey=POLO_KEY, Secret=POLO_SECRET)
 
-# home currency and hub currencies
-HUBS = ['BTC', 'ETH', 'XMR']
 
 # all traded pairs
 ALL_PAIRS = list(polo.returnTicker().keys())
@@ -48,7 +46,7 @@ class dataBot():
             data_panel = {}
             for currency in self.region:
                 data_panel[currency] = self._get_bars(currency)
-            data_panel = pd.DataFrame(data_panel)
+            data_panel = pd.Panel(data_panel)
             self.intraday_ti = data_panel
         return self.intraday_ti
 
@@ -57,63 +55,36 @@ class dataBot():
         prices = pd.Series()
         pair_info = polo.returnTicker()
         for currency in self.region:
-            price = None
-            if self.home + '_' + currency in ALL_PAIRS:
+            currencyPair = self.home + '_' + currency
+            if currencyPair in ALL_PAIRS:
                 currencyPair = self.home + '_' + currency
                 price = float(pair_info[currencyPair]['last'])
             elif currency == self.home:
                 price = 1
-            elif currency + '_' + self.home in ALL_PAIRS:
-                currencyPair = currency + '_' + self.home
-                bars_currencyPair = float(pair_info[currencyPair]['last'])
-                price = 1 / bars_currencyPair
-
             else:
-                for hub in HUBS:
-                    currencyPair1 = self.home + '_' + hub
-                    currencyPair2 = hub + '_' + currency
-                    if (currencyPair1 in ALL_PAIRS) and (currencyPair2 in ALL_PAIRS):
-                        bars1 = float(pair_info[currencyPair1]['last'])
-                        bars2 = float(pair_info[currencyPair2]['last'])
-                        price = bars1 * bars2
-                        break
-            if price is None:
-                raise ValueError('currency or currency pair does not exist!')
+                raise ValueError(currencyPair + ' does not exist!')
             prices[currency] = price
         return prices
 
 
     def _get_bars(self, currency):
-        bars = None
         currencyPair = self.home + '_' + currency
         if currencyPair in ALL_PAIRS:
             bars = self.get_pair_bars(currencyPair)
         elif currency == self.home:
-            bars = 1
-        elif currency + '_' + self.home in ALL_PAIRS:
-            currencyPair = currency + '_' + self.home
-            bars_currencyPair = self.get_pair_bars(currencyPair)
-            bars = 1 / bars_currencyPair
-
+            default_df = self.get_pair_bars('BTC_LTC')
+            bars = pd.DataFrame(1, columns=default_df.columns, index=default_df.index)
         else:
-            for hub in HUBS:
-                currencyPair1 = self.home + '_' + hub
-                currencyPair2 = hub + '_' + currency
-                if (currencyPair1 in ALL_PAIRS) and (currencyPair2 in ALL_PAIRS):
-                    bars1 = self.get_pair_bars(currencyPair1)
-                    bars2 = self.get_pair_bars(currencyPair2)
-                    bars = bars1 * bars2
-                    break
-        if bars is None:
-            raise ValueError('currency or currency pair does not exist!')
+            raise ValueError(currencyPair + ' does not exist!')
         return bars
 
 
+    # volume = volume in BTC; close = close price
     def get_pair_bars(self, currencyPair, start=START, end=END):
         bars = convert_to_df(polo.returnChartData(currencyPair, start, end, self.freq),
                              time_key='date')
 
-        return bars['close']
+        return bars
 
 
     def get_current_positions(self):
