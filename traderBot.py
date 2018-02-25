@@ -7,6 +7,18 @@ import pandas as pd
 import datetime
 from pandas.tseries.offsets import BDay
 
+# CONSTANTS - these should almost never be changed!!!
+SECONDS_IN_A_YEAR = 365.0 * 24.0 * 3600.0
+EPSILON = 10 ** -6
+VIEWGEN_FREQ = 'D'
+FREQ_DICT = {
+    'D': 365,
+    'B': 260,
+    'W': 52,
+    'BM': 12
+}
+
+# PARAMETERS
 # global backtest start date
 GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 
@@ -24,22 +36,14 @@ POLO_CROSS_SECTION = ['BTC', 'AMP', 'ARDR', 'BCH', 'BCN', 'BCY', 'BELA', 'BLK', 
 # home currency and hub currencies
 HOME = 'BTC'
 
-SECONDS_IN_A_YEAR = 365.0 * 24.0 * 3600.0
-EPSILON = 10 ** -6
-TRADING_FREQ = 'D'
-
+# cov related
 MIN_NUM_OF_RETURNS_FOR_COV = 500.0
 
 
 # factor research helpers
-freq_dict = {
-    'D': 365,
-    'B': 260,
-    'W': 52,
-    'BM': 12
-}
+
 def get_sharpe_ratios(ret, freq):
-    return ret.mean() / ret.std() * freq_dict[freq] ** 0.5
+    return ret.mean() / ret.std() * FREQ_DICT[freq] ** 0.5
 
 def get_factor_return_stats(ret_dict):
     net_returns = ret_dict['net']
@@ -64,15 +68,16 @@ def get_factor_return_stats(ret_dict):
 
 # main tradebot class
 class traderBot():
-    def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00, data_frequency_in_seconds=7200.0,
-                 cov_window_in_days=260.0,
+    def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00, price_data_frequency_in_seconds=7200.0,
+                 cov_window_in_days=260.0, viewgen_freq = VIEWGEN_FREQ,
                  trading_lag=1, no_naked_short=True, force_max_out_cash=False,
                  leverage_cap=0.98):
 
         # initialize settings
         self.region = region
         self.home = home
-        self.freq = data_frequency_in_seconds
+        self.viewgen_freq = viewgen_freq
+        self.price_data_freq = price_data_frequency_in_seconds
         self.cov_window = cov_window_in_days
         self.lag = trading_lag
         self.no_naked_short = no_naked_short
@@ -88,7 +93,7 @@ class traderBot():
         self.data = dataBot(region=self.region, home=self.home)
         self.start_date = GLOBAL_START_DATE
         self.end_date = datetime.date.today()
-        self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq=TRADING_FREQ)
+        self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.viewgen_freq)
         self.factor_weights = pd.Series({
             'mom 1w': 0.00,
             'mom 1m': 1.00
@@ -158,7 +163,7 @@ class traderBot():
     # daily asset returns series for backtest
     def get_daily_asset_returns(self):
         intraday_ti = self.get_intraday_ti()
-        daily_ti = intraday_ti[intraday_ti.index.time <= GLOBAL_SNAP_TIME].resample(TRADING_FREQ).last()
+        daily_ti = intraday_ti[intraday_ti.index.time <= GLOBAL_SNAP_TIME].resample(self.viewgen_freq).last()
         daily_returns = daily_ti.fillna(method='pad', limit=5).pct_change()
         return daily_returns
 
@@ -176,7 +181,7 @@ class traderBot():
         sliced_ti = sliced_ti.T[sliced_ti.count(0) > MIN_NUM_OF_RETURNS_FOR_COV].T
 
         # annualize
-        annualizer = SECONDS_IN_A_YEAR / self.freq
+        annualizer = SECONDS_IN_A_YEAR / self.price_data_freq
 
         # TODO: add support for EWMA
         cov_matrix = sliced_ti.pct_change().cov() * annualizer
