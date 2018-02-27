@@ -17,13 +17,14 @@ ALL_CURRENCIES = list({x.split('_')[0] for x in ALL_PAIRS} | \
 # default start, end dates in UNIX time, default sampling frequency
 START = 0
 END = 9999999999
-FREQ = 7200  # freq = 2hr
+
+DEFAULT_TZ = 'US/Eastern'
 
 def convert_to_df(input, time_key='date'):
     df = pd.DataFrame(input)
 
     if time_key in df.columns:
-        df.index = [datetime.fromtimestamp(x) for x in df[time_key]]
+        df.index = [pd.Timestamp(datetime.utcfromtimestamp(x), tz='UTC') for x in df[time_key]]
         df = df.drop(time_key, 1)
     else:
         raise ValueError('time key not found!')
@@ -31,20 +32,23 @@ def convert_to_df(input, time_key='date'):
     return df
 
 class dataBot():
-    def __init__(self, region, home, freq=FREQ):
+    def __init__(self, region, home, freq, tz=DEFAULT_TZ):
+        # freq = 300, 900, 1800, 7200, 14400, or 86400
         self.home = home
         self.freq = freq
         self.region = region
+        self.tz = tz
 
         self.intraday_ti = None
 
         # caching intraday and daily returns
-        self.get_intraday_data()
+        #self.get_intraday_data()
 
     def get_intraday_data(self):
         if self.intraday_ti is None:
             data_panel = {}
             for currency in self.region:
+                print(currency)
                 data_panel[currency] = self._get_bars(currency)
             data_panel = pd.Panel(data_panel)
             self.intraday_ti = data_panel
@@ -83,6 +87,7 @@ class dataBot():
     def get_pair_bars(self, currencyPair, start=START, end=END):
         bars = convert_to_df(polo.returnChartData(currencyPair, start, end, self.freq),
                              time_key='date')
+        bars = bars.tz_convert(self.tz)
 
         return bars
 

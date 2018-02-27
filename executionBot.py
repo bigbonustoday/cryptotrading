@@ -52,7 +52,10 @@ class executionBot():
         for attempt in range(1, max_attempts + 1):
             order_numbers_dict = {}
             for order in unfilled_order_list:
-                order_number = self.send_single_order_on_polo(order=order)
+                if attempt > 3:
+                    order_number = self.send_single_order_on_polo(order=order, limit_x_spread=0.0)
+                else:
+                    order_number = self.send_single_order_on_polo(order=order, limit_x_spread=0.03)
                 if order_number is not None:
                     order_numbers_dict[order_number] = order
 

@@ -24,11 +24,14 @@ GLOBAL_START_DATE = datetime.date(2015, 9, 1)
 
 # global daily price snap time
 GLOBAL_SNAP_TIME = datetime.time(9, 1)
+DEFAULT_TZ = 'US/Eastern'
+
+PRICE_DATA_FREQUENCY_IN_SECONDS = 7200 # load 15min returns
 
 # trading cross section
 POLO_CROSS_SECTION = ['BTC', 'AMP', 'ARDR', 'BCH', 'BCN', 'BCY', 'BELA', 'BLK', 'BTCD', 'BTM', 'BTS', 'BURST', 'CLAM',
                       'CVC', 'DASH', 'DCR', 'DGB', 'DOGE', 'EMC2', 'ETC', 'ETH', 'EXP', 'FCT', 'FLDC', 'FLO', 'GAME',
-                      'GAS', 'GNO', 'GNT', 'GRC', 'HUC', 'LBC', 'LSK', 'LTC', 'MAID', 'NAV', 'NEOS', 'NMC','NXC',
+                      'GAS', 'GNO', 'GNT', 'GRC', 'HUC', 'LBC', 'LSK', 'LTC', 'MAID', 'NAV', 'NEOS', 'NMC', 'NXC',
                       'NXT', 'OMG', 'OMNI', 'PASC', 'PINK', 'POT', 'PPC', 'RADS', 'REP', 'RIC', 'SBD', 'SC', 'STEEM',
                       'STORJ', 'STR', 'STRAT', 'SYS', 'VIA', 'VRC', 'VTC', 'XBC', 'XCP', 'XEM', 'XMR', 'XPM', 'XRP',
                       'XVC', 'ZEC', 'ZRX']
@@ -45,6 +48,7 @@ MIN_NUM_OF_RETURNS_FOR_COV = 500.0
 def get_sharpe_ratios(ret, freq):
     return ret.mean() / ret.std() * FREQ_DICT[freq] ** 0.5
 
+
 def get_factor_return_stats(ret_dict):
     net_returns = ret_dict['net']
     gross_returns_by_pair_dict = ret_dict['gross by pair']
@@ -59,17 +63,18 @@ def get_factor_return_stats(ret_dict):
             'pair gross sharpe std': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).std(),
             'pair gross sharpe bottom 10%': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).quantile(0.1),
             'pair gross sharpe min': get_sharpe_ratios(gross_returns_by_pair_dict[factor], freq).min()
-                          })
+        })
         for factor in gross_returns_by_pair_dict.keys()
     })
     return factor_stats
 
 
-
 # main tradebot class
 class traderBot():
-    def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00, price_data_frequency_in_seconds=7200.0,
-                 cov_window_in_days=260.0, viewgen_freq = VIEWGEN_FREQ,
+    def __init__(self, region=POLO_CROSS_SECTION, home=HOME, risk_target=1.00,
+                 price_data_frequency_in_seconds=PRICE_DATA_FREQUENCY_IN_SECONDS,
+                 tz=DEFAULT_TZ,
+                 cov_window_in_days=260.0, viewgen_freq=VIEWGEN_FREQ,
                  trading_lag=1, no_naked_short=True, force_max_out_cash=False,
                  leverage_cap=0.98):
 
@@ -84,16 +89,17 @@ class traderBot():
         self.risk_target = risk_target
         self.force_max_out_cash = force_max_out_cash  # override risk target; always max out cash usage
         self.leverage_cap = leverage_cap
+        self.tz = tz
 
         # initialiaze logger
         self.initialize_logging()
 
-
         # initialize data members
-        self.data = dataBot(region=self.region, home=self.home)
+        self.data = dataBot(region=self.region, home=self.home, freq=self.price_data_freq)
         self.start_date = GLOBAL_START_DATE
         self.end_date = datetime.date.today()
-        self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.viewgen_freq)
+        self.dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.viewgen_freq,
+                                   tz=self.tz)
         self.factor_weights = pd.Series({
             'vmom 1m': 0.12,
             'vmom 3m': 0.48,
@@ -138,7 +144,7 @@ class traderBot():
 
         # generate executable orders in format
         # (currency to buy, currency to sell, amount in buy currency, amount in sell currency)
-        self.logger.info ('Breaking trade down into executable orders...')
+        self.logger.info('Breaking trade down into executable orders...')
         orders = []
         for currency in [x for x in portfolio_diff.index if x != self.home]:
             buy_currency = None
@@ -161,7 +167,6 @@ class traderBot():
         eb = executionBot(orders=orders)
 
         return
-
 
     # daily asset returns series for backtest
     def get_daily_asset_returns(self):
@@ -281,7 +286,7 @@ class traderBot():
             self.covgen()
         cov = self.cov
         asset_vols = pd.DataFrame({date: pd.Series(np.diag(cov[date]), index=cov[date].columns)
-                                  for date in cov.items})
+                                   for date in cov.items})
         return asset_vols.T.drop(self.home, axis=1)
 
     def viewgen(self):
@@ -290,7 +295,7 @@ class traderBot():
         self.logger.info('Running factor viewgen')
         for factor_name in self.factors.keys():
             self.logger.info('...' + factor_name)
-            factor_values = self.factors[factor_name].drop(self.home, axis=1) # drop home currency because view is
+            factor_values = self.factors[factor_name].drop(self.home, axis=1)  # drop home currency because view is
             # meaningless
 
             # grinold
